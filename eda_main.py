@@ -17,7 +17,7 @@ def configurar_sidebar():
         st.title("Configuración y Contexto")
         
         st.markdown("### 👨‍🏫 Autor")
-        st.info("**Jorge Padilla**\n\nDocente / Investigador\nUniversidad EAFIT")
+        st.info("**Jorge Iván Padilla**\n\nDocente / Investigador\nUniversidad EAFIT")
         
         st.markdown("---")
         
