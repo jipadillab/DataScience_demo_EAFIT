@@ -14,8 +14,6 @@ st.set_page_config(
 # --- PANEL LATERAL (SIDEBAR) ---
 def configurar_sidebar():
     with st.sidebar:
-        # Puedes reemplazar esta URL con el logo real de EAFIT si tienes uno público
-        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/EAFIT_logo.svg/2560px-EAFIT_logo.svg.png", width=150)
         st.title("Configuración y Contexto")
         
         st.markdown("### 👨‍🏫 Autor")
