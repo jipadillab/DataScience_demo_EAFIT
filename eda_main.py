@@ -14,7 +14,8 @@ st.set_page_config(
 # --- PANEL LATERAL (SIDEBAR) ---
 def configurar_sidebar():
     with st.sidebar:
-        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/EAFIT_logo.svg/2560px-EAFIT_logo.svg.png", width=150) # Logo genérico o link
+        # Puedes reemplazar esta URL con el logo real de EAFIT si tienes uno público
+        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/EAFIT_logo.svg/2560px-EAFIT_logo.svg.png", width=150)
         st.title("Configuración y Contexto")
         
         st.markdown("### 👨‍🏫 Autor")
@@ -49,8 +50,9 @@ def configurar_sidebar():
 # --- FUNCIONES DE GRÁFICOS ---
 
 def plot_correlation_heatmap(df):
+    # Seleccionar solo columnas numéricas para correlación
     numeric_df = df.select_dtypes(include=[np.number])
-    if not numeric_df.empty:
+    if not numeric_df.empty and numeric_df.shape[1] > 1:
         corr = numeric_df.corr()
         fig = px.imshow(
             corr, 
@@ -63,13 +65,16 @@ def plot_correlation_heatmap(df):
     return None
 
 def plot_radar_chart(df, cat_col, num_cols):
-    # Agrupar por la categoría seleccionada y sacar promedio de las numéricas
+    """
+    Genera un gráfico de Radar usando Graph Objects para evitar errores de 'shape' en Plotly Express.
+    """
     if not num_cols or not cat_col:
         return None
     
+    # 1. Agrupar y obtener promedios
     df_grouped = df.groupby(cat_col)[num_cols].mean().reset_index()
     
-    # Normalizar datos para que el radar se vea bien (escala 0-1)
+    # 2. Normalizar datos (Escala 0-1) para que el radar sea legible
     df_normalized = df_grouped.copy()
     for col in num_cols:
         max_val = df_grouped[col].max()
@@ -77,19 +82,36 @@ def plot_radar_chart(df, cat_col, num_cols):
         if max_val != min_val:
             df_normalized[col] = (df_grouped[col] - min_val) / (max_val - min_val)
         else:
-            df_normalized[col] = 0
+            df_normalized[col] = 0 # Evitar división por cero
 
-    # Usamos melt para formato largo necesario para plotly express line_polar
-    df_melted = df_normalized.melt(id_vars=cat_col, var_name='Variable', value_name='Valor_Normalizado')
-    
-    fig = px.line_polar(
-        df_melted, 
-        r='Valor_Normalizado', 
-        theta='Variable', 
-        line_close=True, 
-        color=cat_col,
-        markers=True,
-        title=f"Gráfico de Radar: Perfiles por {cat_col} (Valores Normalizados)"
+    # 3. Construir el gráfico con Graph Objects (Más robusto)
+    fig = go.Figure()
+
+    for i, row in df_normalized.iterrows():
+        # Valores de las variables
+        r_values = row[num_cols].values.flatten().tolist()
+        theta_values = list(num_cols)
+        
+        # Cerrar el ciclo del radar manualmente
+        r_values += [r_values[0]]
+        theta_values += [theta_values[0]]
+        
+        fig.add_trace(go.Scatterpolar(
+            r=r_values,
+            theta=theta_values,
+            fill='toself',
+            name=str(row[cat_col])
+        ))
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 1] # Como normalizamos, el rango es fijo
+            )
+        ),
+        showlegend=True,
+        title=f"Perfiles Promedio por {cat_col} (Datos Normalizados 0-1)"
     )
     return fig
 
@@ -165,7 +187,10 @@ def main():
                         c1, c2 = st.columns(2)
                         with c1:
                             # Gráfico de Barras (Conteos)
-                            fig_count = px.bar(df, x=selected_cat, color=selected_cat, title=f"Frecuencia de {selected_cat}")
+                            # Usamos reset_index para que plotly entienda bien las columnas
+                            conteo = df[selected_cat].value_counts().reset_index()
+                            conteo.columns = [selected_cat, 'Frecuencia']
+                            fig_count = px.bar(conteo, x=selected_cat, y='Frecuencia', color=selected_cat, title=f"Frecuencia de {selected_cat}")
                             st.plotly_chart(fig_count, use_container_width=True)
                         with c2:
                             # Gráfico de Pastel
@@ -211,10 +236,23 @@ def main():
 
                 if x_axis and y_axis:
                     color_arg = None if color_var == 'Ninguno' else color_var
-                    fig_scat = px.scatter(df, x=x_axis, y=y_axis, color=color_arg, 
-                                          title=f"Relación: {x_axis} vs {y_axis}", 
-                                          trendline="ols" if (pd.api.types.is_numeric_dtype(df[x_axis]) and pd.api.types.is_numeric_dtype(df[y_axis])) else None)
-                    st.plotly_chart(fig_scat, use_container_width=True)
+                    
+                    # Verificar si podemos aplicar trendline (solo si ambos son numéricos)
+                    is_numeric_x = pd.api.types.is_numeric_dtype(df[x_axis])
+                    is_numeric_y = pd.api.types.is_numeric_dtype(df[y_axis])
+                    
+                    trend = "ols" if (is_numeric_x and is_numeric_y) else None
+                    
+                    try:
+                        fig_scat = px.scatter(df, x=x_axis, y=y_axis, color=color_arg, 
+                                              title=f"Relación: {x_axis} vs {y_axis}", 
+                                              trendline=trend)
+                        st.plotly_chart(fig_scat, use_container_width=True)
+                    except Exception as e:
+                        # Fallback si falla el trendline por tipos de datos raros
+                        st.warning(f"No se pudo generar línea de tendencia: {e}")
+                        fig_scat = px.scatter(df, x=x_axis, y=y_axis, color=color_arg, title=f"Relación: {x_axis} vs {y_axis}")
+                        st.plotly_chart(fig_scat, use_container_width=True)
 
             # PESTAÑA 4: AVANZADO (Radar y Jerarquía)
             with tab4:
@@ -230,7 +268,8 @@ def main():
                     
                     if radar_cat and len(radar_nums) >= 3:
                         fig_radar = plot_radar_chart(df, radar_cat, radar_nums)
-                        st.plotly_chart(fig_radar, use_container_width=True)
+                        if fig_radar:
+                            st.plotly_chart(fig_radar, use_container_width=True)
                     else:
                         st.info("Selecciona al menos 3 variables numéricas para generar el radar.")
                 else:
@@ -243,18 +282,20 @@ def main():
                 if len(cat_cols) >= 2:
                     sb_cols = st.multiselect("Selecciona orden de jerarquía (Anillo interior -> Exterior):", cat_cols, default=list(cat_cols)[:2])
                     if len(sb_cols) >= 2:
-                        fig_sun = px.sunburst(df, path=sb_cols, title="Jerarquía de Datos")
+                        # Contar frecuencias por la jerarquía seleccionada
+                        df_sun = df.groupby(sb_cols).size().reset_index(name='conteo')
+                        fig_sun = px.sunburst(df_sun, path=sb_cols, values='conteo', title="Jerarquía de Datos")
                         st.plotly_chart(fig_sun, use_container_width=True)
                     else:
                         st.info("Selecciona al menos 2 categorías para el Sunburst.")
                 else:
-                    st.warning("Se necesitan al menos 2 columnas categóricas.")
+                    st.warning("Se necesitan al menos 2 columnas categóricas para este gráfico.")
 
         except Exception as e:
-            st.error(f"Ocurrió un error al procesar el archivo: {e}")
+            st.error(f"Ocurrió un error crítico al procesar el archivo: {e}")
     else:
-        # Mensaje de bienvenida cuando no hay archivo
-        st.info("👋 ¡Bienvenido! Por favor carga un archivo CSV para comenzar el análisis.")
+        # Mensaje de bienvenida
+        st.info("👋 ¡Bienvenido! Por favor carga un archivo CSV en el panel central para comenzar.")
         
 if __name__ == "__main__":
     main()
